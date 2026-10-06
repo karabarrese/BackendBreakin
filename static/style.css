@@ -43,3 +43,32 @@ input[type="submit"], a {
 input[type="submit"]:hover, a:hover {
     background-color: #0056b3;
 }
+
+/* Dashboard Styles Below */
+.dashboard-box {
+    width: 500px;
+}
+
+.scroll-box {
+    max-height: 300px;
+    overflow-y: scroll;
+    margin: 20px 0;
+    padding-right: 10px;
+    text-align: left;
+    border-top: 1px solid #eee;
+    border-bottom: 1px solid #eee;
+    width: 100% !important;   
+    box-sizing: border-box;
+}
+
+
+.order-row {
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 0.9em;
+    color: #444;
+}
+
+.order-row strong {
+    color: #007bff;
+}
