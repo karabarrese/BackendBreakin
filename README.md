@@ -29,3 +29,32 @@ How to run (mac):
 Now open [http://127.0.0.1:5000](http://127.0.0.1:5000) in your browser to view the site.
 
 To stop server, press `Ctrl + C` in the terminal
+
+
+----------------------------------
+
+Vulnurability Documentation
+
+
+Working Logins:
+
+u:Land of Toys Inc.
+p:Yu
+
+u:Reims Collectables
+p:Henriot
+
+u:Toys4GrownUps.com
+p:Young
+
+
+Malicious Payloads:
+
+u:*&CONTACTLASTNAME=neq.0
+p:
+
+u:*&CUSTOMERNAME=eq.Lyon Souveniers
+p:
+
+u:*&or=(CUSTOMERNAME.not.is.null)
+p:

@@ -5,9 +5,28 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <h1>Welcome to the Backend!</h1>
-    <p>You have successfully logged in.</p>
-    <a href="/logout">Log Out</a>
+
+    <div class="dashboard-box">
+        <h1>Welcome to the Backend!</h1>
+        <p>You have successfully logged in.</p>
+
+        <div class="scroll-box">
+            {% if user_data %}
+                {% for order in user_data %}
+                    <p class="order-row">
+                        <strong>Order #{{ order.ORDERNUMBER }}</strong><br>
+                        Customer: {{ order.CUSTOMERNAME }}<br>
+                        Product: {{ order.PRODUCTLINE }} | Total: ${{ order.SALES }}
+                    </p>
+                {% endfor %}
+            {% else %}
+                <p>No records found.</p>
+            {% endif %}
+        </div>
+
+        <a href="/logout">Log Out</a>
+    </div>
+
 </body>
 </html>
 
