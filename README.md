@@ -5,7 +5,7 @@
 
 
 
-**Simple HTML Frontend with Flask Backend:**
+### Simple HTML Frontend with Flask Backend:
 
 How to run (mac):
 
@@ -33,28 +33,28 @@ To stop server, press `Ctrl + C` in the terminal
 
 ----------------------------------
 
-Vulnurability Documentation
+### Working Logins for Testing 
+(u = CUSTOMERNAME, p = CONTACTLASTNAME):
+
+* u: `Land of Toys Inc.`  p: `Yu`
+
+* u: `Reims Collectables` p: `Henriot`
+
+* u: `Toys4GrownUps.com` p: `Young`
+
+----------------------------------
+
+### Why Parameter Injection Fails Here
+
+Even though this code builds the request URL unsafely, you cannot bypass the login using HTTP Parameter Pollution (HPP). 
+
+"Unsafe code": `vulnerable_query = f"CUSTOMERNAME=eq.{username}&CONTACTLASTNAME=eq.{password}"`
+
+Injection Attempt: `Toys4GrownUps.com&or=(://toys4grownups.com)` 
+* Trying to use the ampersand (&) to break out of the original URL structure and add a global or condition to bypass the password check.
+
+* Why it didn't work: 
+    - Supabase didn't let the injected "OR" command overwrite and replace the password check, it chained them both together with strict "AND" logic. 
+    - Because a database row cannot match two conflicting instructions at the same time, the query automatically canceled itself out, returned zero data rows, and safely failed the login.
 
 
-Working Logins:
-
-u:Land of Toys Inc.
-p:Yu
-
-u:Reims Collectables
-p:Henriot
-
-u:Toys4GrownUps.com
-p:Young
-
-
-Malicious Payloads:
-
-u:*&CONTACTLASTNAME=neq.0
-p:
-
-u:*&CUSTOMERNAME=eq.Lyon Souveniers
-p:
-
-u:*&or=(CUSTOMERNAME.not.is.null)
-p:

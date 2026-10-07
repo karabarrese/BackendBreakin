@@ -1,5 +1,4 @@
-Flask
+flask
 requests
 python-dotenv
-sqlite3
 supabase

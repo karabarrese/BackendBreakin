@@ -37,7 +37,7 @@ def login():
         vulnerable_query = requests.utils.unquote(vulnerable_query)
 
         # Piece together the final web link
-        target_url = f"{SUPABASE_URL}?apikey={SUPABASE_API_KEY}&{vulnerable_query}&select=*"
+        target_url = f"{SUPABASE_URL}/rest/v1/sales?apikey={SUPABASE_API_KEY}&{vulnerable_query}&select=*"
 
         # Attach the secret keys
         headers = {
