@@ -8,7 +8,7 @@
 -- Each is a demo the agent can discover. Fill in Owner / Status as a team.
 -- "Setup needed" flags anything beyond running this script.
 --
-1. Plaintext passwords (users table)
+--   1. Plaintext passwords (users table)
 --        Passwords stored as readable text -- no hashing, salting, or encryption.
 --        Fix: hash passwords
 --        DONE
