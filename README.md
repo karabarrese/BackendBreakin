@@ -12,6 +12,10 @@
     
     http://localhost:5000/login
 
+    OR
+
+    http://127.0.0.1:5000
+
 To stop server, press `Ctrl + C` in the terminal
 
 To reset database, `docker compose down -v`
@@ -110,10 +114,9 @@ To stop server, press `Ctrl + C` in the terminal
 
 ----------------------------------
 
-# Vulnurability Documentation
+# Vulnerability Documentation
 
-### SQL INJECTION:
-
+### 1. SQL INJECTION (OWASP #5):
 In line 52 of app.py, we can see this section:
 
 #SAFE: cur.execute("SELECT * FROM users WHERE username = %s AND password = %s", (username, password))
@@ -122,5 +125,30 @@ In line 52 of app.py, we can see this section:
 we can see that the unsafe example treats the input as a format string, and embeds the username and password inside of itself. This makes the code vulnerable to SQL injections because it doesn't know what is written by the user and what is in the original string
 
 for example, passing the username and password in as:
-' OR '1'='1
+U:' OR '1'='1
+P:' OR '1'='1
 ...returns the entire database
+
+### 2. CRYPTOGRAPHIC FAILURES (OWASP #4)
+passwords are stored & compared in plain text...
+
+## 3. Security Misconfiguration (OWASP #2)
+debug=True on 0.0.0.0 (how do we exploit this?)
+hardcoded: secred_key='temporary_secret_key'
+
+## 4. XSS (Cross Site Scripting)
+
+line 63 in app.py demonstrates another vulnerabiltiy with putting variables in as formatting strings, this lets them execute javascript or put html in there. It acts as a trigger point almost, because the code will execute when the login fails.
+return f"Login Failed for '{username}' :P Please try again..." 
+
+U:<script>alert('xss')</script>
+P:dsffksa
+
+Returns:
+Database connectivity error: syntax error at or near "xss" LINE 1: ...email FROM users WHERE username = '
+
+attackers can figure out more about the database and organization of it based on this output...
+
+## 5. Broken Access Control (OWASP #1)
+
+when user not logged in and they go to /security, there are old credentials lying there...

@@ -2,7 +2,7 @@ This is just if you wanted to run the frontend of the website with the one Docke
 
 
 ## How to run (Windows):
---------------------------------------------------------------
+-------------------------------------- ------------------------
 
 1. Download docker:
 https://docs.docker.com/desktop/setup/install/windows-install/

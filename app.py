@@ -60,7 +60,7 @@ def login():
                     session['active_query'] = vulnerable_query
                     return redirect(url_for('dashboard'))
                 else:
-                    return "Login Failed :P Please try again..."
+                    return f"Login Failed for '{username}' Please try again..." #XSS Vulnerability: If the username contains HTML or JS... this can break the page or run malicious code in the user's browser. For example, if the username is <script>alert('XSS')</script>, it will execute an alert in the browser.
 
         except Exception as e:
             # If the internet drops or the database fails, catch the error here
@@ -87,6 +87,18 @@ def dashboard():
 
     # Send the user data straight to dashboard.html to render nicely on screen
     return render_template('dashboard.html', user_data=user_data)
+
+@app.route('/secrets')
+def secrets():
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT key, value FROM secrets")
+        rows = cur.fetchall()
+    # no  if 'user' not in session  guard — anyone can hit /secrets
+    output = "<h1>Secrets</h1>"
+    for key, value in rows:
+        output += f"<p><strong>{key}:</strong> {value}</p>"
+    return output
 
 @app.route('/logout')
 def logout():
