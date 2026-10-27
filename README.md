@@ -97,3 +97,15 @@ To stop server, press `Ctrl + C` in the terminal
 Vulnurability Documentation
 
 
+# SQL INJECTION:
+
+In line 52 of app.py, we can see this section:
+
+#SAFE: cur.execute("SELECT * FROM users WHERE username = %s AND password = %s", (username, password))
+#UNSAFE: cur.execute(f"SELECT id, username, password, email FROM users WHERE username = '{username}' AND password = '{password}'")
+(in the actual code, input is written as a vulnerable_query variable)                
+we can see that the unsafe example treats the input as a format string, and embeds the username and password inside of itself. This makes the code vulnerable to SQL injections because it doesn't know what is written by the user and what is in the original string
+
+for example, passing the username and password in as:
+' OR '1'='1
+...returns the entire database

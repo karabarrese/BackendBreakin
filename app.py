@@ -50,8 +50,10 @@ def login():
             with get_connection() as conn:
                 cur = conn.cursor() #cursor: object you run SQL queries through (Pointer to resule set)
                 cur.execute(vulnerable_query) #sends the SQL string to posgress and runs it
-                #safe ex:
-                #cur.execute("SELECT * FROM users WHERE username = %s AND password = %s", (username, password))
+                
+                #SAFE: cur.execute("SELECT * FROM users WHERE username = %s AND password = %s", (username, password))
+                #UNSAFE: cur.execute(f"SELECT id, username, password, email FROM users WHERE username = '{username}' AND password = '{password}'")
+                
                 rows = cur.fetchall() #pulls back all matching rows as a list (if empty, nothing matched)
                 if rows:
                     session['user'] = username
