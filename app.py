@@ -1,9 +1,7 @@
 import os
-import sqlite3
+import psycopg2 #opens a connection to the database
 from flask import Flask, request, redirect, url_for, session, render_template
 from dotenv import load_dotenv
-from supabase import create_client, Client
-import requests
 
 # Load variables from the .env file
 load_dotenv()
@@ -11,14 +9,17 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = 'temporary_secret_key'
 
-# Fetch the hidden credentials from the environment
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
+DB_HOST = os.getenv("LAB_DB_HOST", "127.0.0.1")
+DB_PORT = int(os.getenv("LAB_DB_PORT", "5432"))
+DB_NAME = os.getenv("LAB_DB_NAME", "breach_lab")
+DB_USER = os.getenv("LAB_DB_USER", "app_user")
+DB_PASSWORD = os.getenv("LAB_DB_PASSWORD", "app_password")
 
-# supabase: Client = create_client(
-#     os.environ.get("SUPABASE_URL"),
-#     os.environ.get("SUPABASE_KEY")
-# )
+def get_connection():
+    return psycopg2.connect(
+        host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
+        user=DB_USER, password=DB_PASSWORD, connect_timeout=10,
+    )
 
 @app.route('/')
 def home():
@@ -34,39 +35,31 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
 
-        # UNSECURE: without sanitizing, put user text into a search string
-        vulnerable_query = f"CUSTOMERNAME=eq.{username}&CONTACTLASTNAME=eq.{password}"
-        #CUSTOMERNAME=eq.{username}&CONTACTLASTNAME=eq.{password}
-
-        # Make & work
-        vulnerable_query = requests.utils.unquote(vulnerable_query)
-
-        # Piece together the final web link
-        target_url = f"{SUPABASE_URL}?apikey={SUPABASE_API_KEY}&{vulnerable_query}&select=*"
-
-        # Attach the secret keys
-        headers = {
-            "apikey": SUPABASE_API_KEY,
-            "Authorization": f"Bearer {SUPABASE_API_KEY}"
-        }
+        #example of a vulnerable query that is susceptible to SQL injection attacks
+        # vulnerable_query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}';"
         
-        
+        #the f"WHERE is most important because it's a format string, f strings make it so that when people input variables, they are treated as part of the real string
+        vulnerable_query = (
+            "SELECT id, username, password, email FROM users "
+            f"WHERE username = '{username}' AND password = '{password}'" #vulnerable to SQL, username ex: ' OR '1'='1
+            #the WHERE will return true and output everything if the user inputs ' OR '1'='1
+            #would return every line in the table...
+        )
+
         try:
-            # Send the search query over the internet
-            response = requests.get(target_url)
-            data = response.json()
+            with get_connection() as conn:
+                cur = conn.cursor() #cursor: object you run SQL queries through (Pointer to resule set)
+                cur.execute(vulnerable_query) #sends the SQL string to posgress and runs it
+                #safe ex:
+                #cur.execute("SELECT * FROM users WHERE username = %s AND password = %s", (username, password))
+                rows = cur.fetchall() #pulls back all matching rows as a list (if empty, nothing matched)
+                if rows:
+                    session['user'] = username
+                    session['active_query'] = vulnerable_query
+                    return redirect(url_for('dashboard'))
+                else:
+                    return "Login Failed :P Please try again..."
 
-            #  THE CHECKPOOL: Did the database find any records matching that query?
-            # (If a normal user typed correct info, it returns 1 row. If an attacker 
-            # uses SQL injection to force the logic to be True, it returns ALL rows!)
-            if isinstance(data, list) and len(data) > 0:
-                # Log them in! Save their name and search string in the browser's memory
-                session['user'] = username
-                session['active_query'] = vulnerable_query 
-                return redirect(url_for('dashboard'))
-            else:
-                # No data came back, meaning the login details were wrong
-                return "Login Failed! Go back and try again."
         except Exception as e:
             # If the internet drops or the database fails, catch the error here
             return f"Database connectivity error: {str(e)}"
@@ -79,18 +72,13 @@ def dashboard():
     if 'user' not in session:
         return redirect(url_for('login'))
 
-    # Re-build that exact same search link we stored during the login step
-    target_url = f"{SUPABASE_URL}?{session['active_query']}&select=*"
-
-    headers = {
-        "apikey": SUPABASE_API_KEY,
-        "Authorization": f"Bearer {SUPABASE_API_KEY}"
-    }
-    
     try:
-        # Pull the live data rows from the database
-        response = requests.get(target_url, headers=headers)
-        user_data = response.json()
+        # Grab the active query from the session and run it again to get the user data
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(session['active_query'])
+            cols = [d.name for d in cur.description] # Get column names
+            user_data = [dict(zip(cols, row)) for row in cur.fetchall()] # Convert rows to list of dicts
     except Exception:
         # If anything breaks, fallback to an empty list so the page doesn't crash
         user_data = []

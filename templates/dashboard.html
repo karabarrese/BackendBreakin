@@ -12,11 +12,11 @@
 
         <div class="scroll-box">
             {% if user_data %}
-                {% for order in user_data %}
+                {% for row in user_data %}
                     <p class="order-row">
-                        <strong>Order #{{ order.ORDERNUMBER }}</strong><br>
-                        Customer: {{ order.CUSTOMERNAME }}<br>
-                        Product: {{ order.PRODUCTLINE }} | Total: ${{ order.SALES }}
+                        {% for key, value in row.items() %}
+                            <strong>{{ key }}:</strong> {{ value }}<br>
+                        {% endfor %}
                     </p>
                 {% endfor %}
             {% else %}
