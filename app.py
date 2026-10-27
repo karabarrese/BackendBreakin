@@ -94,5 +94,5 @@ def logout():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', debug=True) #dangerous to run debug mode true, especially on 0.0.0.0, but this site is just for testing purposes :P
 

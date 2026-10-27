@@ -1,8 +1,26 @@
 # BackendBreakin
 *Coding Project For CSCI 180*
+------------------------------
+
+## DOCKER instructions to run website 
+
+1. Run this in main
+    
+    `docker compose up --build`
+
+2. View website at: 
+    
+    http://localhost:5000/login
+
+To stop server, press `Ctrl + C` in the terminal
+
+To reset database, `docker compose down -v`
 
 ------------------------------
-How to run (mac):
+
+## MANUAL instructions to run website 
+
+### How to run (mac):
 
 0. Install PostgreSQL (one time): 
     (assuming you have homebrew installed)
@@ -38,9 +56,7 @@ Now open [http://127.0.0.1:5000](http://127.0.0.1:5000) in your browser to view 
 To stop server, press `Ctrl + C` in the terminal
 
 
-----------------------------------
-
-How to run (Windows):
+### How to run (Windows):
 
 0. Install PostgreSQL (one time):
 
@@ -94,10 +110,9 @@ To stop server, press `Ctrl + C` in the terminal
 
 ----------------------------------
 
-Vulnurability Documentation
+# Vulnurability Documentation
 
-
-# SQL INJECTION:
+### SQL INJECTION:
 
 In line 52 of app.py, we can see this section:
 
