@@ -22,7 +22,7 @@ import tools
 from logbook import LogBook
 from report_generator import generate_html_report
 
-MAX_STEPS = 40  # limit so we don't go broke
+MAX_STEPS = 100  # limit so we don't go broke
 
 """
 The SYSTEM definition is critical to make sure Claude doesn't 
@@ -140,7 +140,7 @@ def run(goal):
         messages.append({"role": "user", "content": results})
 
 
-    log.tool_result("run_end", step=MAX_STEPS, stop_reason="max_steps")
+    log.run_end(step=MAX_STEPS, stop_reason="max_steps")  
     print("\n=== hit MAX_STEPS; stopping ===")
     # Generate HTML report
     report_path = generate_html_report(config.LOG_PATH)
