@@ -13,7 +13,7 @@ import os
 # The Website will have an IP address or a http://sitename
 DB_HOST = os.environ.get("LAB_TARGET_HOST", "127.0.0.1")
 WEB_HOST = os.environ.get("LAB_TARGET_HOST", "127.0.0.1") # This will change when get get the website
-WEB_PORT = int(os.environ.get("LAB_WEB_PORT", "8080"))    # I assume it will be port 80 or 8080
+WEB_PORT = int(os.environ.get("LAB_WEB_PORT", "5000"))    # I assume it will be port 80 or 8080
 DB_PORT = int(os.environ.get("LAB_DB_PORT", "5432"))     # PostgreSQL
 
 # --- Gray-box starting knowledge --------------------------------------------

@@ -94,7 +94,7 @@
 	Get a key from the [Claude Console](https://console.anthropic.com/), then:
 
 	```bash
-	export ANTHROPIC_API_KEY=put-your-api-key-here
+	export ANTHROPIC_API_KEY=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
 	```
 
 	To avoid re-typing it every session, add that line to `~/.zshrc`.
