@@ -1,2 +1,4 @@
 .venv
 .env
+attack/__pycache__
+attack/runs
