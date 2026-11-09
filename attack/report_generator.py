@@ -272,7 +272,7 @@ def generate_html_report(logbook_path, output_path=None):
 """
 
     # Write HTML
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
 
     return output_path

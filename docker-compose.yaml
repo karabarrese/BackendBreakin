@@ -4,6 +4,8 @@ services:
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: breach_lab
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - ./attack/setup_lab.sql:/docker-entrypoint-initdb.d/10_setup_lab.sql:ro
   web:

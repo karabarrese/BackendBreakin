@@ -7,14 +7,36 @@ creates. A fresh clone should run with nothing exported except your API key.
 """
 
 import os
+import ipaddress
+
+# This enforces loopback targets
+def _loopback_host(name, default="127.0.0.1"):
+    host = os.environ.get(name, default)
+    
+    if host.lower() == "localhost":
+        return host
+    
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as error:
+        raise ValueError(
+            f"{name} must be localhost or a loopback IP address"
+        ) from error
+        
+    if not address.is_loopback:
+        raise ValueError(
+            f"{name} must be a loopback address, got {host!r}"
+        )
+    
+    return host
 
 # --- Target -----------------------------------------------------------------
 # The lab is loopback-only for direct DB access. 
 # The Website will have an IP address or a http://sitename
-DB_HOST = os.environ.get("LAB_TARGET_HOST", "127.0.0.1")
-WEB_HOST = os.environ.get("LAB_TARGET_HOST", "127.0.0.1") # This will change when get get the website
-WEB_PORT = int(os.environ.get("LAB_WEB_PORT", "5000"))    # I assume it will be port 80 or 8080
+DB_HOST = _loopback_host("LAB_DB_HOST")
+WEB_HOST = _loopback_host("LAB_WEB_HOST") # This will change when get get the website
 DB_PORT = int(os.environ.get("LAB_DB_PORT", "5432"))     # PostgreSQL
+WEB_PORT = int(os.environ.get("LAB_WEB_PORT", "5000"))    # I assume it will be port 80 or 8080
 
 # --- Gray-box starting knowledge --------------------------------------------
 # What a low-privilege app user would have on day one: it knows the DB is

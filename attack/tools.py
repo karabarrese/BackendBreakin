@@ -27,6 +27,47 @@ import config
 import psycopg 
 
 
+# Tool registry to handle argument validation and reading tool calls
+# required arguments use args["x"]; optional arguments use args.get("x")
+# NOTE: when you add a tool, add a corresponding tool registry too
+
+def _run_recon(args):
+    return recon_nmap(
+        ports=args.get("ports", "1-10000")
+    )
+
+def _run_http(args):
+    return http_probe(
+        path=args["path"],
+        method=args.get("method", "GET"),
+        body=args.get("body"),
+    )
+
+def _run_pg_query(args):
+    return pg_query(
+        sql=args["sql"],
+        user=args.get("user"),
+        password=args.get("password"),
+    )
+
+# Dispatch by tool name. Each function pulls the arguments Claude chose
+# out of data.input (a dict) and passes them explicitly.
+# Catches missing arguments, unknown tools, and general tool exceptions
+def dispatch_tool(name, args):
+    if not isinstance(args, dict):
+        return "ERROR: tool arguments must be an object."
+    
+    handler = TOOL_HANDLERS.get(name)
+    if handler is None:
+        return f"ERROR: unknown tool {name}"
+    
+    try:
+        return handler(args)
+    except KeyError as error:
+        return f"ERROR: missing required argument: {error.args[0]}"
+    except Exception as error:
+        return f"ERROR: {type(error).__name__}: {error}"
+
 # Scan the lab host for open services. `ports` e.g. '5432,8080' or '1-10000'.
 def recon_nmap(ports):
     if shutil.which("nmap") is None:
@@ -115,6 +156,7 @@ def try_credentials(user, passwords=None):
 # add a tool, add its schema here AND a matching branch in agent.py (see
 # EXTENDING.md).
 
+# What Claude is allowed to request
 TOOL_SCHEMAS = [
     {
         "name": "recon_nmap",
@@ -174,3 +216,10 @@ TOOL_SCHEMAS = [
         },
     },
 ]
+
+# How Python executes each request
+TOOL_HANDLERS = {
+    "recon_nmap": _run_recon,
+    "http_probe": _run_http,
+    "pg_query": _run_pg_query,
+}
