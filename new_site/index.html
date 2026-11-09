@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Backend Breakin</title>
+</head>
+<body>
+
+    <h1>backend breakin</h1>
+    
+    <input type="text" id="userInput" placeholder="Username"><br><br>
+    <input type="password" id="passInput" placeholder="Password"><br><br>
+    <button onclick="runQuery()">Submit</button>
+
+    <p>Database Response:</p>
+    <pre id="output">No query executed yet.</pre>
+
+    <script>
+        async function runQuery() {
+            const user = document.getElementById('userInput').value;
+            const pass = document.getElementById('passInput').value;
+            const outputElement = document.getElementById('output');
+            
+            // This sends the username input field down the exact same vulnerable pathway
+            const response = await fetch(`http://localhost:3000/search?username=${encodeURIComponent(user)}`);
+            const data = await response.text();
+            outputElement.textContent = data;
+        }
+    </script>
+
+</body>
+</html>
