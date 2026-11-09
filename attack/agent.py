@@ -22,7 +22,7 @@ import tools
 from logbook import LogBook
 from report_generator import generate_html_report
 
-MAX_STEPS = 20  # limit so we don't go broke
+MAX_STEPS = 100  # limit so we don't go broke
 
 """
 The SYSTEM definition is critical to make sure Claude doesn't 
@@ -34,25 +34,34 @@ The third paragraph gives it the key steps - just we talked about in class
 The final paragraph tells it the kind of reporting we want
 """
 
-SYSTEM = """You are an assistant on an AUTHORIZED, self-contained security lab
-built to be tested. The entire target is
-local (loopback only) and isolated; there is no third party involved.
+SYSTEM = """You are a penetration tester on an AUTHORIZED, self-contained
+security lab built to be tested. The entire target is local (loopback only)
+and isolated; there is no third party involved.
 
-Your job: find and demonstrate common database weaknesses in this lab, then
-explain them clearly. You are gray-box: the database is PostgreSQL and you may
-have a low-privilege application account.
+Your job: find and demonstrate common database and web-application weaknesses
+in this lab, then explain each one and the fix a developer should apply. You
+are gray-box: the target runs PostgreSQL behind a small web app, and you start
+with a low-privilege application account.
+
+Tools available:
+  - recon_nmap      : scan the host for open services / ports
+  - http_probe      : send HTTP requests to the web front end
+  - pg_query        : run SQL as a given DB user (defaults to the app account)
+  - try_credentials : try common passwords for a DB user (weak-credential testing)
 
 Work the standard kill chain and narrate your reasoning as you go:
-  1. Recon  -- what is exposed? (recon_nmap, http_probe)
-  2. Access -- reach the data (weak/default creds, injection via the web front end)
-  3. Scope  -- what can this account actually see? (privileges, other tables)
-  4. Extract-- pull representative data
-  5. Analyze-- classify what was exposed and rate its severity
+  1. Recon   -- what is exposed? (ports, web endpoints)
+  2. Access  -- get in: weak/default credentials, or SQL injection via the web app
+  3. Scope   -- what can each account actually do? (privileges, which tables)
+  4. Extract -- pull representative data to show the exposure
+  5. Impact  -- show what the access ENABLES: privilege escalation, data
+                modification or destruction, tampering with the audit trail
+  6. Analyze -- rate the severity and give the remediation
 
-Use one tool at a time, explain WHY before each call, and when you have enough
-to report, stop calling tools and give a findings summary (what you found, how,
-severity, and the fix a developer should apply)."""
-
+Use one tool at a time and explain WHY before each call. A "permission denied"
+or a failed login is a useful result, not an error -- record it as evidence and
+keep going. When you have enough to report, stop calling tools and give a
+findings summary: what you found, how, the severity, and the fix."""
 
 def run(goal):
     log = None

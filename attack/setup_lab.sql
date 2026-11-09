@@ -59,6 +59,10 @@ BEGIN
 END
 $$;
 
+-- VULNERABILITY #4: give admin a weak, guessable password (runs every setup).
+-- NOTE: only has effect once pg_hba.conf enforces passwords (scram-sha-256).
+ALTER ROLE admin WITH PASSWORD 'letmein';
+
 -- Create the users table (Vulnerability: plaintext password storage)
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
