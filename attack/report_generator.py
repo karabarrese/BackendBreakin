@@ -1,280 +1,404 @@
 """
-Generate a pretty HTML report from a logfile.
-Run after an agent completes to inspect the full trace.
+Generate a polished HTML report from a run logfile (runs/latest.jsonl).
+
+Reads the same JSONL the LogBook writes and renders a clean penetration-test
+report: a summary header, a timeline of steps, each agent reasoning block
+rendered from markdown, and every tool call with colour-coded, syntax-aware
+input/output.
+
+Run after an agent completes:
+    python report_generator.py runs/latest.jsonl [out.html]
 """
 
+import html
 import json
+import re
 import sys
-from pathlib import Path
-from datetime import datetime
 
 
-def generate_html_report(logbook_path, output_path=None):
-    """Read a logbook JSONL file and generate an HTML report."""
-    if output_path is None:
-        output_path = logbook_path.replace(".jsonl", ".html")
+# --------------------------------------------------------------------------- #
+#  Minimal, dependency-free markdown -> HTML (the agent writes markdown)
+# --------------------------------------------------------------------------- #
 
-    # Read all log entries
+def _inline(text):
+    """Escape HTML, then apply inline markdown: code, bold, italic, links."""
+    text = html.escape(text, quote=False)
+    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"(?<!\*)\*(?!\*)([^*]+)\*(?!\*)", r"<em>\1</em>", text)
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)",
+                  r'<a href="\2">\1</a>', text)
+    return text
+
+
+def md_to_html(text):
+    """Convert a block of markdown to HTML. Handles headings, lists, tables,
+    fenced code, blockquotes and paragraphs -- enough for the agent's output."""
+    lines = (text or "").split("\n")
+    out, i, n = [], 0, len(lines)
+
+    def flush_para(buf):
+        if buf:
+            out.append("<p>" + "<br>".join(_inline(b) for b in buf) + "</p>")
+            buf.clear()
+
+    para = []
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+
+        # fenced code block
+        if stripped.startswith("```"):
+            flush_para(para)
+            lang = stripped[3:].strip()
+            code = []
+            i += 1
+            while i < n and not lines[i].strip().startswith("```"):
+                code.append(lines[i])
+                i += 1
+            i += 1  # skip closing fence
+            cls = " class=\"lang-sql\"" if lang.lower() == "sql" else ""
+            out.append(f"<pre class=\"code\"><code{cls}>" +
+                       html.escape("\n".join(code)) + "</code></pre>")
+            continue
+
+        # table: a line of | ... | followed by a |---| separator
+        if "|" in line and i + 1 < n and re.match(r"^\s*\|?[\s:|-]+\|?\s*$", lines[i + 1]) \
+                and "|" in lines[i + 1] and "-" in lines[i + 1]:
+            flush_para(para)
+            def cells(row):
+                row = row.strip().strip("|")
+                return [c.strip() for c in row.split("|")]
+            header = cells(line)
+            i += 2
+            body = []
+            while i < n and "|" in lines[i] and lines[i].strip():
+                body.append(cells(lines[i]))
+                i += 1
+            t = ["<table><thead><tr>"]
+            t += [f"<th>{_inline(c)}</th>" for c in header]
+            t.append("</tr></thead><tbody>")
+            for row in body:
+                t.append("<tr>" + "".join(f"<td>{_inline(c)}</td>" for c in row) + "</tr>")
+            t.append("</tbody></table>")
+            out.append("".join(t))
+            continue
+
+        # heading
+        m = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+        if m:
+            flush_para(para)
+            lvl = len(m.group(1))
+            out.append(f"<h{lvl}>{_inline(m.group(2))}</h{lvl}>")
+            i += 1
+            continue
+
+        # horizontal rule
+        if re.match(r"^(\*\*\*+|---+|___+)$", stripped):
+            flush_para(para)
+            out.append("<hr>")
+            i += 1
+            continue
+
+        # blockquote
+        if stripped.startswith(">"):
+            flush_para(para)
+            quote = []
+            while i < n and lines[i].strip().startswith(">"):
+                quote.append(lines[i].strip()[1:].strip())
+                i += 1
+            out.append("<blockquote>" + "<br>".join(_inline(q) for q in quote) + "</blockquote>")
+            continue
+
+        # unordered list
+        if re.match(r"^[-*+]\s+", stripped):
+            flush_para(para)
+            items = []
+            while i < n and re.match(r"^[-*+]\s+", lines[i].strip()):
+                items.append(re.sub(r"^[-*+]\s+", "", lines[i].strip()))
+                i += 1
+            out.append("<ul>" + "".join(f"<li>{_inline(it)}</li>" for it in items) + "</ul>")
+            continue
+
+        # ordered list
+        if re.match(r"^\d+[.)]\s+", stripped):
+            flush_para(para)
+            items = []
+            while i < n and re.match(r"^\d+[.)]\s+", lines[i].strip()):
+                items.append(re.sub(r"^\d+[.)]\s+", "", lines[i].strip()))
+                i += 1
+            out.append("<ol>" + "".join(f"<li>{_inline(it)}</li>" for it in items) + "</ol>")
+            continue
+
+        # blank line = paragraph break
+        if not stripped:
+            flush_para(para)
+            i += 1
+            continue
+
+        para.append(stripped)
+        i += 1
+
+    flush_para(para)
+    return "\n".join(out)
+
+
+# --------------------------------------------------------------------------- #
+#  Log parsing
+# --------------------------------------------------------------------------- #
+
+TOOL_META = {
+    "recon_nmap":      ("Recon",   "nmap"),
+    "http_probe":      ("Web",     "http"),
+    "pg_query":        ("Database", "sql"),
+    "try_credentials": ("Credentials", "key"),
+}
+
+
+def parse_log(path):
     entries = []
-    with open(logbook_path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 entries.append(json.loads(line))
 
-    # Group entries by step
-    steps = {}
-    metadata = {}
-    for entry in entries:
-        kind = entry.get("kind")
-        step = entry.get("step", -1)
-
+    meta, steps = {}, {}
+    tool_calls = 0
+    errors = 0
+    for e in entries:
+        kind = e.get("kind")
+        step = e.get("step", -1)
         if kind == "run_start":
-            metadata = entry
+            meta = dict(e)
         elif kind == "run_end":
-            metadata["end_reason"] = entry.get("stop_reason")
+            meta["end_reason"] = e.get("stop_reason")
         elif step >= 0:
-            if step not in steps:
-                steps[step] = {"reasoning": [], "tools": []}
+            s = steps.setdefault(step, {"reasoning": [], "tools": []})
             if kind == "model_text":
-                steps[step]["reasoning"].append(entry["text"])
+                s["reasoning"].append(e["text"])
             elif kind == "tool_call":
-                steps[step]["tools"].append({
-                    "name": entry["tool"],
-                    "input": entry["input"],
-                    "call": entry,
-                })
+                tool_calls += 1
+                s["tools"].append({"name": e["tool"], "input": e["input"], "output": ""})
             elif kind == "tool_result":
-                if steps[step]["tools"]:
-                    steps[step]["tools"][-1]["output"] = entry["output"]
+                out = e.get("output", "")
+                if s["tools"]:
+                    s["tools"][-1]["output"] = out
+                if _is_error(out):
+                    errors += 1
+    return meta, steps, {"steps": len(steps), "tool_calls": tool_calls, "errors": errors}
 
-    # Generate HTML
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Database Breach Lab Report</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-            color: #e2e8f0;
-            line-height: 1.6;
-            padding: 20px;
-        }}
-        .container {{
-            max-width: 1000px;
-            margin: 0 auto;
-        }}
-        header {{
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid #475569;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }}
-        h1 {{
-            color: #38bdf8;
-            margin-bottom: 10px;
-        }}
-        .metadata {{
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            font-size: 14px;
-        }}
-        .metadata-item {{
-            background: rgba(51, 65, 85, 0.5);
-            padding: 8px 12px;
-            border-radius: 4px;
-        }}
-        .metadata-label {{
-            color: #94a3b8;
-            font-weight: 500;
-        }}
-        .metadata-value {{
-            color: #e2e8f0;
-            margin-top: 2px;
-            font-family: monospace;
-        }}
-        .step {{
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid #475569;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }}
-        .step-number {{
-            color: #38bdf8;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }}
-        .reasoning {{
-            background: rgba(51, 65, 85, 0.3);
-            border-left: 3px solid #10b981;
-            padding: 12px 15px;
-            margin-bottom: 15px;
-            border-radius: 4px;
-        }}
-        .tool {{
-            margin-bottom: 15px;
-            background: rgba(51, 65, 85, 0.2);
-            border-radius: 4px;
-            overflow: hidden;
-        }}
-        .tool-header {{
-            background: rgba(251, 146, 60, 0.1);
-            border-left: 3px solid #fb923c;
-            padding: 10px 15px;
-            font-weight: 500;
-            color: #fb923c;
-        }}
-        .tool-input, .tool-output {{
-            padding: 12px 15px;
-            background: rgba(30, 41, 59, 0.6);
-            border-top: 1px solid rgba(51, 65, 85, 0.5);
-        }}
-        .tool-input-label, .tool-output-label {{
-            color: #94a3b8;
-            font-size: 12px;
-            margin-bottom: 5px;
-        }}
-        pre {{
-            background: rgba(15, 23, 42, 0.9);
-            padding: 10px;
-            border-radius: 4px;
-            overflow-x: auto;
-            font-size: 12px;
-            color: #a1f717;
-        }}
-        .sql {{
-            color: #60a5fa;
-        }}
-        .result-table {{
-            width: 100%;
-            background: rgba(15, 23, 42, 0.9);
-            color: #e2e8f0;
-            padding: 10px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 12px;
-            white-space: pre-wrap;
-            word-break: break-all;
-        }}
-        .error {{
-            color: #ff6b6b;
-        }}
-        footer {{
-            text-align: center;
-            color: #64748b;
-            font-size: 12px;
-            margin-top: 30px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>🔍 Database Breach Lab Report</h1>
-            <div class="metadata">
-                <div class="metadata-item">
-                    <div class="metadata-label">Goal</div>
-                    <div class="metadata-value">{metadata.get('goal', 'N/A')}</div>
-                </div>
-                <div class="metadata-item">
-                    <div class="metadata-label">Target</div>
-                    <div class="metadata-value">{metadata.get('target', 'N/A')}</div>
-                </div>
-                <div class="metadata-item">
-                    <div class="metadata-label">Model</div>
-                    <div class="metadata-value">{metadata.get('model', 'N/A')}</div>
-                </div>
-                <div class="metadata-item">
-                    <div class="metadata-label">Result</div>
-                    <div class="metadata-value">{metadata.get('end_reason', 'N/A')}</div>
-                </div>
-            </div>
-        </header>
 
-        <div class="steps">
+def _is_error(out):
+    o = str(out)
+    return o.startswith("ERROR") or o.startswith("DB ERROR") or "permission denied" in o
+
+
+# --------------------------------------------------------------------------- #
+#  Rendering
+# --------------------------------------------------------------------------- #
+
+CSS = """
+:root{
+  --bg:#eef1f6; --panel:#ffffff; --ink:#1c2534; --muted:#64748b; --line:#e3e8f0;
+  --accent:#4f46e5; --accent-soft:#eef2ff;
+  --code-bg:#0f172a; --code-ink:#e2e8f0; --code-key:#7dd3fc; --code-str:#86efac;
+  --ok:#0f9d58; --warn:#b45309; --err:#dc2626; --err-soft:#fef2f2;
+  --t-recon:#0d9488; --t-web:#7c3aed; --t-db:#2563eb; --t-cred:#d97706;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:960px;margin:0 auto;padding:40px 24px 80px}
+
+header.report{background:linear-gradient(135deg,#1e1b4b,#312e81);color:#fff;
+  border-radius:16px;padding:30px 34px;box-shadow:0 10px 30px rgba(49,46,129,.25)}
+header.report .eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:12px;
+  font-weight:600;color:#c7d2fe;margin-bottom:6px}
+header.report h1{margin:0 0 4px;font-size:26px;letter-spacing:-.01em}
+header.report .goal{color:#e0e7ff;font-size:15px;margin-top:10px;
+  padding-top:14px;border-top:1px solid rgba(255,255,255,.15)}
+
+.stats{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0 6px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:12px 16px;flex:1;min-width:120px}
+.stat .num{font-size:24px;font-weight:700;line-height:1}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.06em}
+.pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+.pill.ok{background:#dcfce7;color:var(--ok)} .pill.warn{background:#fef3c7;color:var(--warn)}
+.pill.err{background:var(--err-soft);color:var(--err)}
+
+.meta-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{background:rgba(255,255,255,.12);color:#e0e7ff;border-radius:8px;
+  padding:5px 10px;font-size:12.5px}
+.chip b{color:#fff;font-weight:600}
+
+h2.section{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);
+  margin:34px 2px 14px}
+
+.step{position:relative;display:flex;gap:18px;margin-bottom:18px}
+.rail{flex:0 0 auto;display:flex;flex-direction:column;align-items:center}
+.rail .dot{width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;
+  box-shadow:0 2px 6px rgba(79,70,229,.4)}
+.rail .line{flex:1;width:2px;background:var(--line);margin-top:4px}
+.step:last-child .rail .line{display:none}
+
+.body{flex:1;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:18px 20px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.reasoning{font-size:15px}
+.reasoning h1,.reasoning h2,.reasoning h3,.reasoning h4{line-height:1.3;margin:16px 0 8px}
+.reasoning h1{font-size:20px} .reasoning h2{font-size:17px} .reasoning h3{font-size:15px}
+.reasoning p{margin:8px 0}
+.reasoning ul,.reasoning ol{margin:8px 0;padding-left:22px}
+.reasoning li{margin:3px 0}
+.reasoning table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+.reasoning th,.reasoning td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+.reasoning th{background:#f8fafc;font-weight:600}
+.reasoning blockquote{margin:10px 0;padding:8px 14px;border-left:3px solid var(--accent);
+  background:var(--accent-soft);border-radius:0 8px 8px 0;color:#3730a3}
+.reasoning hr{border:0;border-top:1px solid var(--line);margin:16px 0}
+.reasoning code{background:#eef2f7;padding:1px 6px;border-radius:5px;font-size:.88em;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.reasoning pre.code{background:var(--code-bg);color:var(--code-ink);padding:14px 16px;
+  border-radius:10px;overflow-x:auto;margin:12px 0}
+.reasoning pre.code code{background:none;color:inherit;padding:0;font-size:13px}
+
+.tool{margin-top:12px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel)}
+.tool-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);background:#fbfcfe}
+.badge{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  color:#fff;border-radius:6px;padding:3px 8px}
+.badge.recon{background:var(--t-recon)} .badge.web{background:var(--t-web)}
+.badge.db{background:var(--t-db)} .badge.cred{background:var(--t-cred)}
+.badge.other{background:var(--muted)}
+.tool-name{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;font-weight:600}
+.tool-sub{color:var(--muted);font-size:12.5px;margin-left:auto;font-family:ui-monospace,monospace}
+.io{padding:12px 14px}
+.io .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:6px}
+.io pre{margin:0;background:var(--code-bg);color:var(--code-ink);padding:12px 14px;border-radius:9px;
+  overflow-x:auto;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.5}
+.io pre.result{background:#0b1220}
+.io pre.error{background:#2a0f12;color:#fecaca;border:1px solid #7f1d1d}
+.io .sqlkw{color:var(--code-key)} .io .sqlstr{color:var(--code-str)}
+footer{text-align:center;color:var(--muted);font-size:12px;margin-top:40px}
+@media (max-width:620px){.wrap{padding:20px 14px 60px}.step{gap:12px}}
 """
 
-    # Add steps
-    for step_num in sorted(steps.keys()):
-        step_data = steps[step_num]
-        html += f"""
-        <div class="step">
-            <div class="step-number">Step {step_num}</div>
-"""
+SQL_KEYWORDS = (r"\b(SELECT|FROM|WHERE|INSERT|INTO|VALUES|UPDATE|SET|DELETE|DROP|CREATE|"
+                r"TABLE|ROLE|USER|GRANT|REVOKE|ALTER|AND|OR|NOT|NULL|ORDER BY|GROUP BY|"
+                r"LIMIT|JOIN|ON|AS|UNION|TRUNCATE|DISTINCT)\b")
 
-        # Add reasoning
-        for reasoning in step_data["reasoning"]:
-            html += f"""
-            <div class="reasoning">
-                {reasoning}
-            </div>
-"""
 
-        # Add tool calls
-        for tool_data in step_data["tools"]:
-            tool_name = tool_data["name"]
-            tool_input = tool_data["input"]
-            tool_output = tool_data.get("output", "")
+def _highlight_sql(sql):
+    s = html.escape(sql)
+    s = re.sub(r"('[^']*')", r'<span class="sqlstr">\1</span>', s)
+    s = re.sub(SQL_KEYWORDS, r'<span class="sqlkw">\1</span>', s, flags=re.I)
+    return s
 
-            html += f"""
-            <div class="tool">
-                <div class="tool-header">→ {tool_name}</div>
-"""
 
-            # Format input based on tool type
-            if tool_name == "pg_query":
-                sql = tool_input.get("sql", "")
-                user = tool_input.get("user", "")
-                html += f"""
-                <div class="tool-input">
-                    <div class="tool-input-label">SQL Query (as {user}):</div>
-                    <pre><span class="sql">{sql}</span></pre>
-                </div>
-"""
-            else:
-                html += f"""
-                <div class="tool-input">
-                    <div class="tool-input-label">Input:</div>
-                    <pre>{json.dumps(tool_input, indent=2)}</pre>
-                </div>
-"""
+def _badge_class(tool):
+    return {"recon_nmap": "recon", "http_probe": "web",
+            "pg_query": "db", "try_credentials": "cred"}.get(tool, "other")
 
-            # Format output
-            if tool_output:
-                is_error = tool_output.startswith("ERROR")
-                html += f"""
-                <div class="tool-output">
-                    <div class="tool-output-label">Result:</div>
-                    <div class="result-table {'error' if is_error else ''}">{tool_output[:2000]}</div>
-                </div>
-"""
 
-            html += """
-            </div>
-"""
+def _tool_input_html(tool, inp):
+    if tool == "pg_query":
+        sub = inp.get("user") or "app_user"
+        body = f'<div class="io"><div class="lbl">SQL — as {html.escape(str(sub))}</div>' \
+               f'<pre>{_highlight_sql(inp.get("sql",""))}</pre></div>'
+        return f'as {html.escape(str(sub))}', body
+    if tool == "http_probe":
+        method = inp.get("method", "GET")
+        path = inp.get("path", "/")
+        sub = f"{method} {path}"
+        lines = f"{method} {path}"
+        if inp.get("body"):
+            lines += "\n\n" + inp["body"]
+        return sub, f'<div class="io"><div class="lbl">Request</div><pre>{html.escape(lines)}</pre></div>'
+    if tool == "recon_nmap":
+        sub = inp.get("ports", "")
+        return f"ports {sub}", f'<div class="io"><div class="lbl">Input</div><pre>{html.escape(json.dumps(inp))}</pre></div>'
+    # generic
+    return "", f'<div class="io"><div class="lbl">Input</div><pre>{html.escape(json.dumps(inp, indent=2))}</pre></div>'
 
-        html += """
-        </div>
-"""
 
-    html += """
-        </div>
+def _tool_output_html(out):
+    if not out:
+        return ""
+    cls = "result error" if _is_error(out) else "result"
+    text = str(out)
+    if len(text) > 4000:
+        text = text[:4000] + "\n… (truncated)"
+    return f'<div class="io"><div class="lbl">Result</div><pre class="{cls}">{html.escape(text)}</pre></div>'
 
+
+def _status_pill(reason):
+    if reason == "end_turn":
+        return '<span class="pill ok">Completed</span>'
+    if reason in ("max_steps", "tool_use"):
+        return '<span class="pill warn">Hit step limit</span>'
+    if reason == "error":
+        return '<span class="pill err">Error</span>'
+    return f'<span class="pill warn">{html.escape(str(reason))}</span>'
+
+
+def generate_html_report(logbook_path, output_path=None):
+    if output_path is None:
+        output_path = logbook_path.replace(".jsonl", ".html")
+    meta, steps, stats = parse_log(logbook_path)
+
+    chips = "".join(
+        f'<span class="chip"><b>{k}:</b> {html.escape(str(meta.get(v,"N/A")))}</span>'
+        for k, v in [("Target", "target"), ("Model", "model")]
+    )
+    head = f"""
+    <header class="report">
+      <div class="eyebrow">Breach Lab · Penetration Test Report</div>
+      <h1>Agent Run Summary</h1>
+      <div class="meta-row">{chips}</div>
+      <div class="goal"><b>Goal:</b> {html.escape(str(meta.get('goal','N/A')))}</div>
+    </header>
+    <div class="stats">
+      <div class="stat"><div class="num">{stats['steps']}</div><div class="lbl">Steps</div></div>
+      <div class="stat"><div class="num">{stats['tool_calls']}</div><div class="lbl">Tool calls</div></div>
+      <div class="stat"><div class="num">{stats['errors']}</div><div class="lbl">Denied / errors</div></div>
+      <div class="stat"><div class="num" style="font-size:16px;padding-top:4px">{_status_pill(meta.get('end_reason'))}</div><div class="lbl">Result</div></div>
     </div>
-</body>
-</html>
-"""
+    """
 
-    # Write HTML
+    body = ['<h2 class="section">Timeline</h2>']
+    for num in sorted(steps):
+        s = steps[num]
+        reasoning = "".join(f'<div class="reasoning">{md_to_html(r)}</div>' for r in s["reasoning"])
+        tools_html = ""
+        for t in s["tools"]:
+            bclass = _badge_class(t["name"])
+            label, inp_html = _tool_input_html(t["name"], t["input"] if isinstance(t["input"], dict) else {})
+            out_html = _tool_output_html(t["output"])
+            tools_html += f"""
+            <div class="tool">
+              <div class="tool-head">
+                <span class="badge {bclass}">{html.escape(t['name'])}</span>
+                <span class="tool-name">{html.escape(t['name'])}</span>
+                <span class="tool-sub">{html.escape(label)}</span>
+              </div>
+              {inp_html}{out_html}
+            </div>"""
+        card = f'<div class="card">{reasoning or "<p class=\'tool-sub\'>(tool step)</p>"}{tools_html}</div>'
+        body.append(f'<div class="step"><div class="rail"><div class="dot">{num}</div>'
+                    f'<div class="line"></div></div><div class="body">{card}</div></div>')
+
+    htmldoc = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Breach Lab Report</title><style>{CSS}</style></head>
+<body><div class="wrap">{head}{''.join(body)}
+<footer>Generated by the Breach Lab agent · report_generator.py</footer>
+</div></body></html>"""
+
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html)
-
+        f.write(htmldoc)
     return output_path
 
 
@@ -282,9 +406,5 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python report_generator.py <logbook.jsonl> [output.html]")
         sys.exit(1)
-
-    logbook = sys.argv[1]
-    output = sys.argv[2] if len(sys.argv) > 2 else None
-
-    result = generate_html_report(logbook, output)
-    print(f"✓ Report generated: {result}")
+    out = generate_html_report(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    print(f"Report generated: {out}")

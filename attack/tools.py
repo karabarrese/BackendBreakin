@@ -23,6 +23,7 @@ TODO:
 import shutil
 import subprocess
 import urllib.request
+import urllib.error
 import config
 import psycopg 
 
@@ -48,6 +49,12 @@ def _run_pg_query(args):
         sql=args["sql"],
         user=args.get("user"),
         password=args.get("password"),
+    )
+
+def _run_try_credentials(args):
+    return try_credentials(
+        user=args["user"],
+        passwords=args.get("passwords"),
     )
 
 # Dispatch by tool name. Each function pulls the arguments Claude chose
@@ -133,7 +140,7 @@ COMMON_PASSWORDS = [
 def try_credentials(user, passwords=None):
     if psycopg is None:
         return "ERROR: psycopg is not installed. Run: pip install 'psycopg[binary]'"
-    candidates = COMMON_PASSWORDS
+    candidates = passwords or COMMON_PASSWORDS
     tried = 0
     for pw in candidates:
         tried += 1
@@ -222,4 +229,5 @@ TOOL_HANDLERS = {
     "recon_nmap": _run_recon,
     "http_probe": _run_http,
     "pg_query": _run_pg_query,
+    "try_credentials": _run_try_credentials,
 }
